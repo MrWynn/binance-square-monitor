@@ -69,13 +69,25 @@ def _pid_running(pid: int | None) -> bool:
 def _start_one(name: str, script: str) -> dict:
     path = BASE_DIR / script
     creationflags = 0
+    popen_kwargs = {
+        "cwd": str(BASE_DIR),
+    }
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_CONSOLE
+        popen_kwargs["creationflags"] = creationflags
+    else:
+        # Detach child processes from the current SSH session and silence
+        # inherited stdio so they keep running after the terminal closes.
+        popen_kwargs.update({
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "start_new_session": True,
+        })
 
     proc = subprocess.Popen(
         [sys.executable, str(path)],
-        cwd=str(BASE_DIR),
-        creationflags=creationflags,
+        **popen_kwargs,
     )
     return {
         "pid": proc.pid,

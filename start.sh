@@ -6,4 +6,4 @@ if [ ! -f ".venv/bin/python" ]; then
     exit 1
 fi
 
-.venv/bin/python manage_processes.py start
+.venv/bin/python manage_processes.py start --no-browser
