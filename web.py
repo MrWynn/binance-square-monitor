@@ -432,6 +432,7 @@ def api_trading():
             "positions": positions,
             "candidates": candidates,
             "loss_archive": loss_archive,
+            "allow_account_reset": bool(getattr(config, "ALLOW_ACCOUNT_RESET", False)),
         }
     return _cached("trading", 2.0, compute)
 
@@ -466,6 +467,8 @@ def api_trading_reset(body: TradingResetBody):
 
     安全：前端必须显式传 confirm=true 才会执行。
     """
+    if not getattr(config, "ALLOW_ACCOUNT_RESET", False):
+        raise HTTPException(403, "账户重置功能未开启")
     if not body.confirm:
         raise HTTPException(400, "需要 confirm=true 以确认重置")
     if body.new_initial_balance is not None and body.new_initial_balance <= 0:
@@ -557,6 +560,9 @@ tr:hover { background: #1f2536; }
   background: #c0392b; color: #fff;
 }
 .refresh-btn.danger-btn:hover { background: #e74c3c; }
+.refresh-btn.danger-btn:disabled {
+  background: #5b5f68; color: #c7cad1; cursor: not-allowed;
+}
 
 /* 顶部进度条 */
 .progress-bar {
@@ -828,7 +834,7 @@ tr.flash { animation: row-flash 1.5s ease-out; }
     </div>
     <div style="display:flex;align-items:end;gap:8px;">
       <button class="refresh-btn" onclick="saveTradingSettings()">保存交易设置</button>
-      <button class="refresh-btn danger-btn" onclick="resetTradingAccount()"
+      <button id="trade-reset-btn" class="refresh-btn danger-btn" onclick="resetTradingAccount()"
               title="清空所有持仓和历史记录，把账户恢复到初始金额">重置账户</button>
     </div>
   </div>
@@ -1420,6 +1426,7 @@ const fmtUsdGlobal = fmtUsd;
 function renderTradingPanel(data) {
   const acc = data.account || {};
   const settings = acc.settings || {};
+  const allowAccountReset = !!data.allow_account_reset;
   const active = document.activeElement;
   const editingSettings = active && active.closest && active.closest('.trade-controls');
   if (!editingSettings) {
@@ -1428,6 +1435,14 @@ function renderTradingPanel(data) {
     document.getElementById('trade-initial').value = settings.initial_balance ?? '';
     document.getElementById('trade-leverage').value = settings.leverage ?? '';
     document.getElementById('trade-order-amount').value = settings.order_amount ?? '';
+  }
+
+  const resetBtn = document.getElementById('trade-reset-btn');
+  if (resetBtn) {
+    resetBtn.disabled = !allowAccountReset;
+    resetBtn.title = allowAccountReset
+      ? '清空所有持仓和历史记录，把账户恢复到初始金额'
+      : '账户重置功能未开启，请先在 config.py 中将 ALLOW_ACCOUNT_RESET 设为 True';
   }
 
   document.getElementById('trade-summary').innerHTML = `
@@ -1603,6 +1618,11 @@ async function saveTradingSettings() {
 }
 
 async function resetTradingAccount() {
+  const resetBtn = document.getElementById('trade-reset-btn');
+  if (resetBtn && resetBtn.disabled) {
+    showToast('账户重置功能未开启', 'err');
+    return;
+  }
   // 拿到当前初始金额作为默认值
   const initialInput = document.getElementById('trade-initial');
   const currentInitial = Number(initialInput.value) || 1000;

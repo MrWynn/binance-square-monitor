@@ -54,8 +54,9 @@ SHORT_HALF_LIFE_HOURS = 0.25    # 热度衰减半衰期
 TOP_N_SHORT = 20                # 榜单显示前 N
 
 # === Web 仪表盘 ===
-WEB_HOST = "127.0.0.1"
+WEB_HOST = "0.0.0.0"
 WEB_PORT = 8000
+ALLOW_ACCOUNT_RESET = False
 
 # === 合约分析 ===
 ENABLE_MARKET_ANALYSIS = True
