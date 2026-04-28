@@ -2,7 +2,7 @@
 币安公开行情 API 封装（只读，不需要 API Key）
 
 涉及接口：
-- /api/v3/ticker/24hr           现货 24h 数据
+- /fapi/v1/ticker/24hr          合约 24h 数据
 - /fapi/v1/exchangeInfo         合约上市列表（判断某币有没有永续合约）
 - /fapi/v1/premiumIndex         合约标记价 + 资金费率
 - /fapi/v1/openInterest         未平仓合约量
@@ -20,7 +20,6 @@ import json
 import config
 
 
-SPOT_BASE = "https://api.binance.com"
 FAPI_BASE = "https://fapi.binance.com"
 
 # 简单内存缓存：合约上市列表几小时才变一次，没必要每轮都请求
@@ -246,7 +245,7 @@ def get_market_snapshot(token: str) -> Optional[dict]:
       change_1h_pct       1 小时价格变化（%）
       change_4h_pct       4 小时价格变化（%）
       change_24h_pct      24 小时价格变化（%）
-      volume_24h_usd      24 小时成交额
+      volume_24h_usd      24 小时合约成交额
       long_short_ratio    全网多空账户比（>1 = 多头多）
       top_trader_ls_ratio 大户持仓多空比
     任何字段取不到就是 None
@@ -375,8 +374,8 @@ def get_market_snapshot(token: str) -> Optional[dict]:
         except (TypeError, ValueError, ZeroDivisionError):
             pass
 
-    # 5) 现货 24h 数据
-    ticker = _http_get(f"{SPOT_BASE}/api/v3/ticker/24hr", {"symbol": symbol})
+    # 5) 合约 24h 数据
+    ticker = _http_get(f"{FAPI_BASE}/fapi/v1/ticker/24hr", {"symbol": symbol})
     if ticker:
         try:
             snap["change_24h_pct"] = float(ticker.get("priceChangePercent"))

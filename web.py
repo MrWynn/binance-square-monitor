@@ -883,7 +883,7 @@ tr.flash { animation: row-flash 1.5s ease-out; }
         <th class="right">15m</th>
         <th class="right">1h</th>
         <th class="right">4h</th>
-        <th class="right">24h成交额</th>
+        <th class="right">24h合约成交额</th>
         <th class="right">费率/8h</th>
         <th class="right">OI 15m</th>
         <th class="right">OI 1h</th>
@@ -1131,7 +1131,7 @@ function renderDeepAnalysis(items) {
           <div class="metric"><div class="label">1% 卖盘深度</div><div class="value">${fmtUsd(s.depth_ask_1pct_usd)}</div></div>
           <div class="metric"><div class="label">多空比(散户)</div><div class="value">${s.long_short_ratio ? s.long_short_ratio.toFixed(2) : '-'}</div></div>
           <div class="metric"><div class="label">多空比(大户)</div><div class="value">${s.top_trader_ls_ratio ? s.top_trader_ls_ratio.toFixed(2) : '-'}</div></div>
-          <div class="metric"><div class="label">24h 成交额</div><div class="value">${fmtUsd(s.volume_24h_usd)}</div></div>
+          <div class="metric"><div class="label">24h 合约成交额</div><div class="value">${fmtUsd(s.volume_24h_usd)}</div></div>
         </div>
         ${a.oi_divergence ? `
           <div class="divergence-banner ${a.oi_divergence.type}">
