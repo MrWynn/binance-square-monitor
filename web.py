@@ -753,13 +753,30 @@ tr.flash { animation: row-flash 1.5s ease-out; }
 }
 .closed-positions-scroll {
   max-height: 260px;
-  overflow-y: auto;
+  overflow: auto;
   border-top: 1px solid var(--border);
+  -webkit-overflow-scrolling: touch;
 }
-.closed-positions-scroll table { margin-top: 0; }
+.closed-positions-scroll table {
+  margin-top: 0;
+  min-width: 920px;
+}
 .closed-positions-scroll thead th {
   position: sticky; top: 0; z-index: 1;
   background: #0a0e15;
+}
+.closed-positions-scroll th,
+.closed-positions-scroll td {
+  white-space: nowrap;
+}
+.closed-positions-scroll td:last-child {
+  white-space: normal;
+  min-width: 180px;
+}
+.closed-scroll-hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin: -2px 0 8px;
 }
 .compact-table { font-size: 12px; }
 .compact-table th, .compact-table td { padding: 7px 6px; }
@@ -1525,6 +1542,7 @@ function renderClosedPositions(items) {
       <div class="metric"><div class="label">总盈亏</div><div class="value ${totalCls}">${fmtUsdGlobal(totalPnl)}</div></div>
       <div class="metric"><div class="label">胜率</div><div class="value">${winRate.toFixed(1)}%</div></div>
     </div>
+    <div class="closed-scroll-hint">提示：表格可左右滑动查看完整开仓/平仓时间。</div>
     <div class="closed-positions-scroll">
       <table class="compact-table"><thead><tr>
         <th>代币</th><th>状态</th><th class="right">入场</th><th class="right">平仓价</th>

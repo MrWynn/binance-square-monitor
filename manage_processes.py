@@ -26,6 +26,8 @@ setup_file_logging()
 BASE_DIR = Path(__file__).resolve().parent
 PID_FILE = BASE_DIR / ".monitor_processes.json"
 WEB_URL = "http://127.0.0.1:8000"
+STOP_GRACE_SECONDS = 12
+STOP_KILL_SECONDS = 4
 PROGRAMS = [
     ("worker", "worker.py"),
     ("market_realtime", "market_realtime.py"),
@@ -61,9 +63,38 @@ def _pid_running(pid: int | None) -> bool:
         return str(pid) in result.stdout
     try:
         os.kill(pid, 0)
+        stat_path = Path(f"/proc/{pid}/stat")
+        if stat_path.exists():
+            parts = stat_path.read_text(encoding="utf-8", errors="ignore").split()
+            if len(parts) > 2 and parts[2] == "Z":
+                return False
         return True
     except OSError:
         return False
+
+
+def _pid_matches_script(pid: int, script: str) -> bool:
+    """Avoid killing an unrelated process if a stale PID was reused."""
+    if os.name == "nt":
+        return True
+    cmdline_path = Path(f"/proc/{pid}/cmdline")
+    if not cmdline_path.exists():
+        return True
+    try:
+        raw = cmdline_path.read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+    except OSError:
+        return False
+    expected = str(BASE_DIR / script)
+    return script in raw and (str(BASE_DIR) in raw or expected in raw)
+
+
+def _wait_stopped(pid: int, timeout_seconds: float) -> bool:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if not _pid_running(pid):
+            return True
+        time.sleep(0.2)
+    return not _pid_running(pid)
 
 
 def _start_one(name: str, script: str) -> dict:
@@ -119,9 +150,11 @@ def start(open_browser: bool = True):
         print(f"browser: opened {WEB_URL}")
 
 
-def _stop_pid(pid: int) -> bool:
+def _stop_pid(pid: int, script: str) -> str:
     if not _pid_running(pid):
-        return False
+        return "not_running"
+    if not _pid_matches_script(pid, script):
+        return "pid_mismatch"
     if os.name == "nt":
         subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
@@ -129,9 +162,29 @@ def _stop_pid(pid: int) -> bool:
             stderr=subprocess.DEVNULL,
             check=False,
         )
+        return "stopped" if _wait_stopped(pid, STOP_KILL_SECONDS) else "still_running"
     else:
-        os.kill(pid, signal.SIGTERM)
-    return True
+        try:
+            pgid = os.getpgid(pid)
+        except OSError:
+            return "not_running"
+
+        # Processes are started with start_new_session=True, so the script and
+        # Playwright children share a process group that can be stopped together.
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            return "not_running"
+
+        if _wait_stopped(pid, STOP_GRACE_SECONDS):
+            return "stopped"
+
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            return "stopped"
+
+        return "killed" if _wait_stopped(pid, STOP_KILL_SECONDS) else "still_running"
 
 
 def stop():
@@ -140,18 +193,28 @@ def stop():
         print("no saved processes")
         return
 
-    for name, _script in reversed(PROGRAMS):
+    all_stopped = True
+    for name, script in reversed(PROGRAMS):
         info = state.get(name) or {}
         pid = info.get("pid")
         if not pid:
             print(f"{name}: no pid")
             continue
-        if _stop_pid(int(pid)):
+        result = _stop_pid(int(pid), script)
+        if result == "stopped":
             print(f"{name}: stopped pid={pid}")
+        elif result == "killed":
+            print(f"{name}: killed pid={pid}")
+        elif result == "pid_mismatch":
+            all_stopped = False
+            print(f"{name}: pid={pid} does not match {script}; not stopping")
+        elif result == "still_running":
+            all_stopped = False
+            print(f"{name}: still running pid={pid}")
         else:
             print(f"{name}: not running pid={pid}")
 
-    if PID_FILE.exists():
+    if all_stopped and PID_FILE.exists():
         PID_FILE.unlink()
 
 
