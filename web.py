@@ -995,6 +995,17 @@ const fmtFR = (v) => {
 };
 const fmtPrice = (v) => v ? v.toPrecision(5) : '-';
 const fmtNum = (v, d = 2) => v !== null && v !== undefined ? v.toFixed(d) : '-';
+function fmtDateTime(v) {
+  if (!v) return '-';
+  const raw = String(v).trim();
+  const source = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+    ? raw.replace(' ', 'T') + 'Z'
+    : raw;
+  const d = new Date(source);
+  if (Number.isNaN(d.getTime())) return raw;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 function fmtUsd(v) {
   if (!v) return '-';
   if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
@@ -1517,6 +1528,7 @@ function renderClosedPositions(items) {
     <div class="closed-positions-scroll">
       <table class="compact-table"><thead><tr>
         <th>代币</th><th>状态</th><th class="right">入场</th><th class="right">平仓价</th>
+        <th class="right">开仓时间</th><th class="right">平仓时间</th>
         <th class="right">盈亏</th><th class="right">盈亏率</th><th>操作建议</th>
       </tr></thead><tbody>
         ${items.map(p => {
@@ -1531,6 +1543,8 @@ function renderClosedPositions(items) {
             <td>${p.status}</td>
             <td class="right">${fmtPrice(p.entry_price || p.limit_price)}</td>
             <td class="right">${fmtPrice(p.current_price)}</td>
+            <td class="right">${fmtDateTime(p.created_at)}</td>
+            <td class="right">${fmtDateTime(p.closed_at)}</td>
             <td class="right ${pnlCls}">${fmtUsdGlobal(realized)}</td>
             <td class="right ${pnlCls}">${pnl.toFixed(2)}%</td>
             <td>${p.advice || '-'}</td>
