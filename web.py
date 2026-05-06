@@ -800,14 +800,22 @@ tr.flash { animation: row-flash 1.5s ease-out; }
   gap: 10px; margin-top: 10px; color: var(--muted); font-size: 12px;
 }
 .closed-pagination .pager-buttons {
-  display: flex; gap: 8px;
+  display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;
 }
 .closed-pagination button {
   background: #111722; color: var(--text); border: 1px solid var(--border);
-  border-radius: 4px; padding: 5px 10px; cursor: pointer;
+  border-radius: 4px; padding: 5px 9px; cursor: pointer;
+  min-width: 30px;
 }
 .closed-pagination button:disabled {
   opacity: 0.45; cursor: not-allowed;
+}
+.closed-pagination button.active {
+  background: var(--accent); color: #061014; border-color: var(--accent);
+  cursor: default;
+}
+.closed-pagination .ellipsis {
+  align-self: center; color: var(--muted); padding: 0 2px;
 }
 .compact-table { font-size: 12px; }
 .compact-table th, .compact-table td { padding: 7px 6px; }
@@ -1570,6 +1578,7 @@ function renderClosedPositions(items, stats, pagination) {
   const pageSize = Number(pagination.page_size || 20);
   const totalPages = Number(pagination.total_pages || 1);
   closedPositionsPage = page;
+  const pageButtons = renderClosedPageButtons(page, totalPages);
 
   el.innerHTML = `
     <div class="closed-summary">
@@ -1607,12 +1616,29 @@ function renderClosedPositions(items, stats, pagination) {
     </div>
     <div class="closed-pagination">
       <div>第 ${page} / ${totalPages} 页 · 每页最多 ${pageSize} 条</div>
-      <div class="pager-buttons">
-        <button onclick="changeClosedPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>上一页</button>
-        <button onclick="changeClosedPage(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
-      </div>
+      <div class="pager-buttons">${pageButtons}</div>
     </div>
   `;
+}
+
+function renderClosedPageButtons(page, totalPages) {
+  const pages = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    const start = Math.max(2, page - 2);
+    const end = Math.min(totalPages - 1, page + 2);
+    if (start > 2) pages.push('...');
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (end < totalPages - 1) pages.push('...');
+    pages.push(totalPages);
+  }
+  return pages.map(p => {
+    if (p === '...') return '<span class="ellipsis">...</span>';
+    const active = p === page ? ' class="active" disabled' : '';
+    return `<button onclick="changeClosedPage(${p})"${active}>${p}</button>`;
+  }).join('');
 }
 
 async function changeClosedPage(page) {
