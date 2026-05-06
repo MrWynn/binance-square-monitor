@@ -73,6 +73,7 @@ MIN_DEPTH_1PCT_USD = 100000     # 1% 单侧深度低于该阈值则降权
 MAX_SPREAD_PCT = 0.20           # 买一/卖一价差超过该阈值则降权
 
 # === 收藏代币的学习反馈 ===
+WATCHLIST_ENABLED = False                 # 是否允许新增收藏；False 时点击星标不会收藏/开仓
 LOSS_ARCHIVE_THRESHOLD_PCT = -10.0  # 浮亏超过这个阈值就归档为负面样本（-10 即亏损 10%）
 COMPOSITE_HEAT_TOP_N = 20            # 综合热度榜显示前 N
 COMPOSITE_HISTORY_WINDOW = 20        # 综合热度参考最近 N 轮历史

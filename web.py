@@ -295,6 +295,8 @@ def api_watchlist_add(body: TokenBody):
     token = body.token.strip().upper()
     if not token:
         raise HTTPException(400, "token required")
+    if not getattr(config, "WATCHLIST_ENABLED", False):
+        return {"ok": False, "token": token, "reason": "收藏功能已关闭"}
     with storage.get_conn() as conn:
         storage.watchlist_add(conn, token)
         # 尝试用缓存里最新的快照建锚定
@@ -1313,6 +1315,15 @@ async function toggleWatch(token, currentlyActive) {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
+    if (!data.ok) {
+      document.querySelectorAll(`tr[data-token="${token}"] .star`).forEach(s => {
+        s.classList.toggle('active', currentlyActive);
+        s.setAttribute('onclick', `toggleWatch('${token}', ${currentlyActive})`);
+      });
+      showToast(data.reason || '操作未完成', 'err');
+      await refreshAll({ silent: true });
+      return;
+    }
     const trade = data.trade || {};
     if (currentlyActive) {
       if (trade.closed || trade.canceled) {
