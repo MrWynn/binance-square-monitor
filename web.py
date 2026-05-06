@@ -1490,6 +1490,7 @@ async function loadLossSamples() {
 // === 自动交易面板 ===
 const fmtUsdGlobal = fmtUsd;
 let closedPositionsPage = 1;
+let tradingPanelRequestSeq = 0;
 
 function renderTradingPanel(data) {
   const acc = data.account || {};
@@ -1691,11 +1692,18 @@ function renderTradeLossArchive(archive) {
 }
 
 async function loadTradingPanel() {
+  const requestSeq = ++tradingPanelRequestSeq;
+  const requestedClosedPage = closedPositionsPage;
   try {
-    const resp = await fetch(`/api/trading?closed_page=${closedPositionsPage}`);
+    const resp = await fetch(`/api/trading?closed_page=${requestedClosedPage}`);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    renderTradingPanel(await resp.json());
+    const data = await resp.json();
+    if (requestSeq !== tradingPanelRequestSeq || requestedClosedPage !== closedPositionsPage) {
+      return;
+    }
+    renderTradingPanel(data);
   } catch (e) {
+    if (requestSeq !== tradingPanelRequestSeq) return;
     document.getElementById('trade-summary').innerHTML =
       `<div class="empty">交易面板加载失败：${e.message}</div>`;
   }
