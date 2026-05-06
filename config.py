@@ -96,9 +96,9 @@ TRADING_MAX_NOTIONAL_PCT = 50.0          # 单笔名义价值不超过账户净�
 TRADING_MAX_CONCURRENT_POSITIONS = 0     # v2.5：0 = 不限制（用户要求）。
                                           # 可用余额自然限制实际能开的仓位数。
 TRADING_MAX_DAILY_LOSS_PCT = 5.0         # 当日浮动+已实现亏损超该百分比则熔断停机
-TRADING_MAX_DAILY_TRADES = 15            # 当日最多开仓次数
+TRADING_MAX_DAILY_TRADES = 2147483647            # 当日最多开仓次数
 TRADING_COOLDOWN_MINUTES_AFTER_LOSS = 30 # 同一 token 止损后冷却期（分钟）
-TRADING_CORRELATED_LIMIT = 2             # 相关度高的板块同向仓位上限（目前按粗分类）
+TRADING_CORRELATED_LIMIT = 2147483647             # 相关度高的板块同向仓位上限（目前按粗分类）
 
 # --- 止损：波动率自适应（ATR 风格）---
 # 止损距离 = max(MIN_STOP_PCT, ATR_MULTIPLIER * 最近 N 根 K 线的 ATR%)
