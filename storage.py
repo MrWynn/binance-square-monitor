@@ -646,6 +646,38 @@ def trade_positions_all(conn, limit: int = 50) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]
 
 
+def trade_closed_positions_page(conn, page: int = 1, page_size: int = 20) -> list[dict]:
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+    offset = (page - 1) * page_size
+    cur = conn.execute("""
+        SELECT * FROM trade_positions
+        WHERE status = 'CLOSED'
+        ORDER BY datetime(created_at) DESC, id DESC
+        LIMIT ? OFFSET ?
+    """, (page_size, offset))
+    return [dict(r) for r in cur.fetchall()]
+
+
+def trade_closed_positions_stats(conn) -> dict:
+    row = conn.execute("""
+        SELECT
+            COUNT(*) AS total,
+            COALESCE(SUM(realized_pnl), 0) AS total_pnl,
+            SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins
+        FROM trade_positions
+        WHERE status = 'CLOSED'
+    """).fetchone()
+    total = int(row["total"] or 0)
+    wins = int(row["wins"] or 0)
+    return {
+        "total": total,
+        "total_pnl": float(row["total_pnl"] or 0),
+        "wins": wins,
+        "win_rate": (wins / total * 100) if total else 0,
+    }
+
+
 def trade_has_active(conn, token: str) -> bool:
     row = conn.execute("""
         SELECT 1 FROM trade_positions

@@ -414,7 +414,7 @@ def api_status():
 
 
 @app.get("/api/trading")
-def api_trading():
+def api_trading(closed_page: int = 1):
     """交易面板：账户、持仓、候选信号。默认模拟交易。
 
     性能：2 秒缓存，前端频繁轮询不会每次都重算 candidates
@@ -422,19 +422,36 @@ def api_trading():
     def compute():
         with storage.get_conn() as conn:
             account = trade_logic.account_summary(conn)
-            positions = storage.trade_positions_all(conn, limit=30)
+            open_positions = storage.trade_open_positions(conn)
+            closed_stats = storage.trade_closed_positions_stats(conn)
+            total_closed = closed_stats["total"]
+            closed_page_size = 20
+            max_closed_page = max(1, (total_closed + closed_page_size - 1) // closed_page_size)
+            page = min(max(int(closed_page or 1), 1), max_closed_page)
+            closed_positions = storage.trade_closed_positions_page(
+                conn, page=page, page_size=closed_page_size)
             leaderboard_items, _ = _build_leaderboard_items(conn)
             candidates = trade_logic.build_trade_candidates_from_leaderboard(
                 conn, leaderboard_items, passed_only=True)
             loss_archive = storage.trade_loss_archive_stats(conn)
         return {
             "account": account,
-            "positions": positions,
+            "positions": open_positions + closed_positions,
+            "open_positions": open_positions,
+            "closed_positions": closed_positions,
+            "closed_stats": closed_stats,
+            "closed_pagination": {
+                "page": page,
+                "page_size": closed_page_size,
+                "total": total_closed,
+                "total_pages": max_closed_page,
+            },
             "candidates": candidates,
             "loss_archive": loss_archive,
             "allow_account_reset": bool(getattr(config, "ALLOW_ACCOUNT_RESET", False)),
         }
-    return _cached("trading", 2.0, compute)
+    safe_page = max(int(closed_page or 1), 1)
+    return _cached(f"trading:{safe_page}", 2.0, compute)
 
 
 @app.post("/api/trading/settings")
@@ -455,7 +472,7 @@ def api_trading_settings(body: TradingSettingsBody):
     with storage.get_conn() as conn:
         storage.trading_settings_update(conn, fields)
         settings = storage.trading_settings_get(conn)
-    _cache_invalidate("trading")
+    _cache_invalidate()
     return {"ok": True, "settings": settings}
 
 
@@ -487,7 +504,7 @@ HTML = """
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>Binance Square Monitor</title>
+<title>Binance Monitor</title>
 <style>
 :root {
   --bg: #0f1419;
@@ -778,6 +795,20 @@ tr.flash { animation: row-flash 1.5s ease-out; }
   font-size: 11px;
   margin: -2px 0 8px;
 }
+.closed-pagination {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; margin-top: 10px; color: var(--muted); font-size: 12px;
+}
+.closed-pagination .pager-buttons {
+  display: flex; gap: 8px;
+}
+.closed-pagination button {
+  background: #111722; color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 5px 10px; cursor: pointer;
+}
+.closed-pagination button:disabled {
+  opacity: 0.45; cursor: not-allowed;
+}
 .compact-table { font-size: 12px; }
 .compact-table th, .compact-table td { padding: 7px 6px; }
 @media (max-width: 1100px) {
@@ -797,7 +828,7 @@ tr.flash { animation: row-flash 1.5s ease-out; }
 <div class="progress-bar" id="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
 <div class="toast" id="toast"></div>
 
-<h1>🔥 币安广场热度监控</h1>
+<h1>🔥 币安热度监控</h1>
 <div class="updated" id="updated">加载中...</div>
 
 <div class="disclaimer">
@@ -1450,6 +1481,7 @@ async function loadLossSamples() {
 
 // === 自动交易面板 ===
 const fmtUsdGlobal = fmtUsd;
+let closedPositionsPage = 1;
 
 function renderTradingPanel(data) {
   const acc = data.account || {};
@@ -1482,17 +1514,18 @@ function renderTradingPanel(data) {
     <div class="metric"><div class="label">浮动盈亏</div><div class="value">${fmtUsdGlobal(acc.unrealized_pnl)}</div></div>
   `;
 
-  renderTradePositions(data.positions || []);
+  renderTradePositions(data);
   renderTradeCandidates(data.candidates || []);
   renderTradeLossArchive(data.loss_archive || {});
 }
 
-function renderTradePositions(items) {
+function renderTradePositions(data) {
+  const items = data.positions || [];
   const activeStatuses = new Set(['PENDING', 'OPEN', 'PARTIAL']);
-  const activeItems = items.filter(p => activeStatuses.has(p.status));
-  const closedItems = items.filter(p => !activeStatuses.has(p.status));
+  const activeItems = data.open_positions || items.filter(p => activeStatuses.has(p.status));
+  const closedItems = data.closed_positions || items.filter(p => p.status === 'CLOSED');
   renderOpenPositions(activeItems);
-  renderClosedPositions(closedItems);
+  renderClosedPositions(closedItems, data.closed_stats || {}, data.closed_pagination || {});
 }
 
 function renderOpenPositions(items) {
@@ -1523,22 +1556,24 @@ function renderOpenPositions(items) {
     }).join('') + '</tbody></table>';
 }
 
-function renderClosedPositions(items) {
+function renderClosedPositions(items, stats, pagination) {
   const el = document.getElementById('trade-closed-positions');
-  if (!items.length) {
+  const totalClosed = Number(stats.total || 0);
+  if (!totalClosed) {
     el.innerHTML = '<div class="empty">暂无已平仓记录</div>';
     return;
   }
-  const closed = items.filter(p => p.status === 'CLOSED');
-  const totalPnl = closed.reduce((sum, p) => sum + Number(p.realized_pnl || 0), 0);
-  const wins = closed.filter(p => Number(p.realized_pnl || 0) > 0).length;
-  const losses = closed.filter(p => Number(p.realized_pnl || 0) < 0).length;
-  const winRate = closed.length ? (wins / closed.length * 100) : 0;
+  const totalPnl = Number(stats.total_pnl || 0);
+  const winRate = Number(stats.win_rate || 0);
   const totalCls = totalPnl >= 0 ? 'green' : 'red';
+  const page = Number(pagination.page || 1);
+  const pageSize = Number(pagination.page_size || 20);
+  const totalPages = Number(pagination.total_pages || 1);
+  closedPositionsPage = page;
 
   el.innerHTML = `
     <div class="closed-summary">
-      <div class="metric"><div class="label">已平仓</div><div class="value">${closed.length}</div></div>
+      <div class="metric"><div class="label">已平仓</div><div class="value">${totalClosed}</div></div>
       <div class="metric"><div class="label">总盈亏</div><div class="value ${totalCls}">${fmtUsdGlobal(totalPnl)}</div></div>
       <div class="metric"><div class="label">胜率</div><div class="value">${winRate.toFixed(1)}%</div></div>
     </div>
@@ -1570,7 +1605,20 @@ function renderClosedPositions(items) {
         }).join('')}
       </tbody></table>
     </div>
+    <div class="closed-pagination">
+      <div>第 ${page} / ${totalPages} 页 · 每页最多 ${pageSize} 条</div>
+      <div class="pager-buttons">
+        <button onclick="changeClosedPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+        <button onclick="changeClosedPage(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
+      </div>
+    </div>
   `;
+}
+
+async function changeClosedPage(page) {
+  if (page < 1 || page === closedPositionsPage) return;
+  closedPositionsPage = page;
+  await loadTradingPanel();
 }
 
 function renderTradeCandidates(items) {
@@ -1618,7 +1666,7 @@ function renderTradeLossArchive(archive) {
 
 async function loadTradingPanel() {
   try {
-    const resp = await fetch('/api/trading');
+    const resp = await fetch(`/api/trading?closed_page=${closedPositionsPage}`);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     renderTradingPanel(await resp.json());
   } catch (e) {
