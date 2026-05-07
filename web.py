@@ -416,7 +416,7 @@ def api_status():
 
 
 @app.get("/api/trading")
-def api_trading(closed_page: int = 1):
+def api_trading(closed_page: int = 1, include_closed: bool = True):
     """交易面板：账户、持仓、候选信号。默认模拟交易。
 
     性能：2 秒缓存，前端频繁轮询不会每次都重算 candidates
@@ -425,13 +425,20 @@ def api_trading(closed_page: int = 1):
         with storage.get_conn() as conn:
             account = trade_logic.account_summary(conn)
             open_positions = storage.trade_open_positions(conn)
-            closed_stats = storage.trade_closed_positions_stats(conn)
-            total_closed = closed_stats["total"]
             closed_page_size = 20
-            max_closed_page = max(1, (total_closed + closed_page_size - 1) // closed_page_size)
-            page = min(max(int(closed_page or 1), 1), max_closed_page)
-            closed_positions = storage.trade_closed_positions_page(
-                conn, page=page, page_size=closed_page_size)
+            if include_closed:
+                closed_stats = storage.trade_closed_positions_stats(conn)
+                total_closed = closed_stats["total"]
+                max_closed_page = max(1, (total_closed + closed_page_size - 1) // closed_page_size)
+                page = min(max(int(closed_page or 1), 1), max_closed_page)
+                closed_positions = storage.trade_closed_positions_page(
+                    conn, page=page, page_size=closed_page_size)
+            else:
+                closed_stats = None
+                total_closed = 0
+                max_closed_page = 1
+                page = max(int(closed_page or 1), 1)
+                closed_positions = []
             leaderboard_items, _ = _build_leaderboard_items(conn)
             candidates = trade_logic.build_trade_candidates_from_leaderboard(
                 conn, leaderboard_items, passed_only=True)
@@ -453,7 +460,8 @@ def api_trading(closed_page: int = 1):
             "allow_account_reset": bool(getattr(config, "ALLOW_ACCOUNT_RESET", False)),
         }
     safe_page = max(int(closed_page or 1), 1)
-    return _cached(f"trading:{safe_page}", 2.0, compute)
+    closed_flag = "closed" if include_closed else "open"
+    return _cached(f"trading:{safe_page}:{closed_flag}", 2.0, compute)
 
 
 @app.post("/api/trading/settings")
@@ -771,7 +779,7 @@ tr.flash { animation: row-flash 1.5s ease-out; }
   padding: 8px; min-height: 48px;
 }
 .closed-positions-scroll {
-  max-height: 260px;
+  max-height: 520px;
   overflow: auto;
   border-top: 1px solid var(--border);
   -webkit-overflow-scrolling: touch;
@@ -1345,7 +1353,7 @@ async function toggleWatch(token, currentlyActive) {
 }
 
 async function refreshAll(opts = {}) {
-  const { silent = false, manual = false } = opts;
+  const { silent = false, manual = false, refreshClosed = false } = opts;
   const bar = document.getElementById('progress-bar');
   const btns = document.querySelectorAll('.refresh-btn');
   bar.classList.add('refreshing');
@@ -1364,7 +1372,7 @@ async function refreshAll(opts = {}) {
     const diff = diffTokens(prevLeaderboard, newMap);
 
     renderLeaderboard(lb);
-    await loadTradingPanel();
+    await loadTradingPanel({ refreshClosed: manual || refreshClosed });
 
     // 触发闪烁（仅对已出现过、这次数值有变的 token）
     const toFlash = new Set([...diff.changed]);
@@ -1502,8 +1510,10 @@ async function loadLossSamples() {
 const fmtUsdGlobal = fmtUsd;
 let closedPositionsPage = 1;
 let tradingPanelRequestSeq = 0;
+let closedPositionsRequestSeq = 0;
 
-function renderTradingPanel(data) {
+function renderTradingPanel(data, opts = {}) {
+  const { refreshClosed = false } = opts;
   const acc = data.account || {};
   const settings = acc.settings || {};
   const allowAccountReset = !!data.allow_account_reset;
@@ -1534,18 +1544,21 @@ function renderTradingPanel(data) {
     <div class="metric"><div class="label">浮动盈亏</div><div class="value">${fmtUsdGlobal(acc.unrealized_pnl)}</div></div>
   `;
 
-  renderTradePositions(data);
+  renderTradePositions(data, { refreshClosed });
   renderTradeCandidates(data.candidates || []);
   renderTradeLossArchive(data.loss_archive || {});
 }
 
-function renderTradePositions(data) {
+function renderTradePositions(data, opts = {}) {
+  const { refreshClosed = false } = opts;
   const items = data.positions || [];
   const activeStatuses = new Set(['PENDING', 'OPEN', 'PARTIAL']);
   const activeItems = data.open_positions || items.filter(p => activeStatuses.has(p.status));
-  const closedItems = data.closed_positions || items.filter(p => p.status === 'CLOSED');
   renderOpenPositions(activeItems);
-  renderClosedPositions(closedItems, data.closed_stats || {}, data.closed_pagination || {});
+  if (refreshClosed) {
+    const closedItems = data.closed_positions || items.filter(p => p.status === 'CLOSED');
+    renderClosedPositions(closedItems, data.closed_stats || {}, data.closed_pagination || {});
+  }
 }
 
 function renderOpenPositions(items) {
@@ -1656,7 +1669,7 @@ function renderClosedPageButtons(page, totalPages) {
 async function changeClosedPage(page) {
   if (page < 1 || page === closedPositionsPage) return;
   closedPositionsPage = page;
-  await loadTradingPanel();
+  await loadClosedPositionsPanel();
 }
 
 function renderTradeCandidates(items) {
@@ -1702,22 +1715,34 @@ function renderTradeLossArchive(archive) {
   `;
 }
 
-async function loadTradingPanel() {
+async function loadTradingPanel(opts = {}) {
+  const { refreshClosed = false } = opts;
   const requestSeq = ++tradingPanelRequestSeq;
+  const closedRequestSeq = refreshClosed ? ++closedPositionsRequestSeq : 0;
   const requestedClosedPage = closedPositionsPage;
   try {
-    const resp = await fetch(`/api/trading?closed_page=${requestedClosedPage}`);
+    const includeClosed = refreshClosed ? 'true' : 'false';
+    const resp = await fetch(`/api/trading?closed_page=${requestedClosedPage}&include_closed=${includeClosed}`);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    if (requestSeq !== tradingPanelRequestSeq || requestedClosedPage !== closedPositionsPage) {
+    if (requestedClosedPage !== closedPositionsPage) {
       return;
     }
-    renderTradingPanel(data);
+    if (requestSeq === tradingPanelRequestSeq) {
+      renderTradingPanel(data, { refreshClosed });
+    } else if (refreshClosed && closedRequestSeq === closedPositionsRequestSeq) {
+      const closedItems = data.closed_positions || [];
+      renderClosedPositions(closedItems, data.closed_stats || {}, data.closed_pagination || {});
+    }
   } catch (e) {
     if (requestSeq !== tradingPanelRequestSeq) return;
     document.getElementById('trade-summary').innerHTML =
       `<div class="empty">交易面板加载失败：${e.message}</div>`;
   }
+}
+
+async function loadClosedPositionsPanel() {
+  await loadTradingPanel({ refreshClosed: true });
 }
 
 async function saveTradingSettings() {
@@ -1736,7 +1761,7 @@ async function saveTradingSettings() {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     showToast('交易设置已保存', 'ok');
-    await loadTradingPanel();
+    await loadTradingPanel({ refreshClosed: true });
   } catch (e) {
     showToast('保存交易设置失败：' + e.message, 'err');
   }
@@ -1796,8 +1821,8 @@ async function resetTradingAccount() {
       data.locks_deleted + ' 条锁 / ' + data.loss_archive_deleted + ' 条归档',
       'ok'
     );
-    await loadTradingPanel();
-    await refreshAll({ silent: true });
+    await loadTradingPanel({ refreshClosed: true });
+    await refreshAll({ silent: true, refreshClosed: true });
   } catch (e) {
     showToast('重置失败：' + e.message, 'err');
   }
@@ -1885,10 +1910,11 @@ async function pollWatchlistRealtime() {
   }
 }
 
-refreshAll({ silent: true });
+refreshAll({ silent: true, refreshClosed: true });
 pollWorkerStatus();
 setInterval(pollWatchlistRealtime, 1000);
 setInterval(loadTradingPanel, 3000);
+setInterval(loadClosedPositionsPanel, 60000);
 setInterval(() => refreshAll(), 30000);
 setInterval(pollWorkerStatus, 2000);  // worker 状态高频刷新
 </script>

@@ -136,7 +136,7 @@ TRADING_MAX_CHANGE_4H_PCT = 25.0         # 4h 涨幅超此值则拒绝（追高�
 TRADING_MAX_CHANGE_24H_PCT = 50.0        # 24h 涨幅超此值则拒绝
 
 # --- 入场流动性硬门槛 ---
-TRADING_MIN_24H_VOLUME_USDT = 50000000.0     # 24h 成交额必须 > 50M USDT，缺失也拒绝开仓
+TRADING_MIN_24H_VOLUME_USDT = 80000000.0     # 24h 成交额必须 > 80M USDT，缺失也拒绝开仓
 
 # --- 入场时机硬门槛（v2.2 新增，基于失败归档数据反哺）---
 # 观察到历史亏损样本里 funding_hot(27)/lsr_hot(38)/buy_pressure_faded(73) 标签高频命中，
