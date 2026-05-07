@@ -25,8 +25,12 @@ import storage
 from log_utils import setup_file_logging
 
 
-FSTREAM_BASE = "wss://fstream.binance.com/stream?streams="
+FSTREAM_PUBLIC_STREAM_BASE = "wss://fstream.binance.com/public/stream?streams="
+FSTREAM_MARKET_STREAM_BASE = "wss://fstream.binance.com/market/stream?streams="
 TRADE_WINDOW_SECONDS = 60
+WS_PING_INTERVAL_SECONDS = 150
+WS_PING_TIMEOUT_SECONDS = 600
+WS_RECONNECT_DELAY_SECONDS = 5
 
 setup_file_logging()
 console = Console()
@@ -71,17 +75,30 @@ def _get_realtime_tokens() -> list[str]:
         return []
 
 
-def _streams_for(tokens: list[str]) -> list[str]:
+def _public_streams_for(tokens: list[str]) -> list[str]:
+    streams = []
+    for token in tokens:
+        sym = _symbol(token).lower()
+        streams.extend([
+            f"{sym}@bookTicker",
+            f"{sym}@depth5@100ms",
+        ])
+    return streams
+
+
+def _market_streams_for(tokens: list[str]) -> list[str]:
     streams = []
     for token in tokens:
         sym = _symbol(token).lower()
         streams.extend([
             f"{sym}@markPrice@1s",
-            f"{sym}@bookTicker",
             f"{sym}@aggTrade",
-            f"{sym}@depth5@100ms",
         ])
     return streams
+
+
+def _combined_stream_url(base: str, streams: list[str]) -> str:
+    return base + "/".join(streams)
 
 
 class RealtimeState:
@@ -111,7 +128,7 @@ class RealtimeState:
             "trade_buy_sell_ratio_60s": None,
             "trade_count_60s": 0,
             "updated_at": None,
-            "source": "binance_futures_ws",
+            "source": "binance_futures_ws_routed",
         }
 
     def _ensure(self, token: str) -> dict:
@@ -222,20 +239,71 @@ class RealtimeState:
         return len(rows)
 
 
+async def _consume_stream(name: str, url: str, state: RealtimeState):
+    connect_kwargs = {
+        "ping_interval": WS_PING_INTERVAL_SECONDS,
+        "ping_timeout": WS_PING_TIMEOUT_SECONDS,
+    }
+    while _running:
+        try:
+            async with websockets.connect(url, **connect_kwargs) as ws:
+                console.print(f"[green]Binance Futures {name} WS connected[/green]")
+                while _running:
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                        event = json.loads(raw)
+                        state.handle(event)
+                    except asyncio.TimeoutError:
+                        pass
+                    except json.JSONDecodeError as e:
+                        console.print(f"[dim red]{name} WS invalid message: {e}[/dim red]")
+                    except (OSError, websockets.ConnectionClosed) as e:
+                        console.print(f"[yellow]{name} WS disconnected: {e}; reconnecting...[/yellow]")
+                        break
+                    except Exception as e:
+                        console.print(f"[dim red]{name} WS message handling failed: {e}[/dim red]")
+        except (OSError, websockets.WebSocketException) as e:
+            if _running:
+                console.print(f"[yellow]{name} WS connection failed: {e}; reconnecting...[/yellow]")
+
+        if _running:
+            await asyncio.sleep(WS_RECONNECT_DELAY_SECONDS)
+
+
 async def run_for_watchlist(tokens: list[str]):
     token_set = {t.upper() for t in tokens}
-    streams = _streams_for(tokens)
-    if not streams:
+    public_streams = _public_streams_for(tokens)
+    market_streams = _market_streams_for(tokens)
+    if not public_streams and not market_streams:
         return
 
-    url = FSTREAM_BASE + "/".join(streams)
     state = RealtimeState(tokens)
     last_flush = 0.0
+    last_watchlist_check = 0.0
+    tasks = []
     console.print(f"[green]实时行情订阅: {', '.join(sorted(token_set))}[/green]")
 
-    async with websockets.connect(url, ping_interval=150, ping_timeout=600) as ws:
-        last_watchlist_check = 0.0
+    if public_streams:
+        tasks.append(asyncio.create_task(_consume_stream(
+            "public",
+            _combined_stream_url(FSTREAM_PUBLIC_STREAM_BASE, public_streams),
+            state,
+        )))
+    if market_streams:
+        tasks.append(asyncio.create_task(_consume_stream(
+            "market",
+            _combined_stream_url(FSTREAM_MARKET_STREAM_BASE, market_streams),
+            state,
+        )))
+
+    try:
         while _running:
+            done = [task for task in tasks if task.done()]
+            if done:
+                for task in done:
+                    task.result()
+                return
+
             now = time.time()
             if now - last_watchlist_check >= config.REALTIME_WATCHLIST_POLL_SECONDS:
                 last_watchlist_check = now
@@ -243,21 +311,17 @@ async def run_for_watchlist(tokens: list[str]):
                     console.print("[yellow]实时订阅列表变化，重建实时订阅...[/yellow]")
                     return
 
-            try:
-                raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
-                event = json.loads(raw)
-                state.handle(event)
-            except asyncio.TimeoutError:
-                pass
-            except Exception as e:
-                console.print(f"[dim red]实时消息处理失败: {e}[/dim red]")
-
             now = time.time()
             if now - last_flush >= config.REALTIME_CACHE_FLUSH_SECONDS:
                 count = state.flush()
                 last_flush = now
                 if count:
                     console.print(f"[dim]实时缓存已更新 {count} 个代币[/dim]")
+            await asyncio.sleep(0.2)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def main():

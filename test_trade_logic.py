@@ -8,6 +8,7 @@ os.environ.setdefault("PYTHONPATH", "/home/claude/work")
 
 import sqlite3
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import config
@@ -42,6 +43,51 @@ def _insert_position(conn, entry=100, stop=98, tp1=102, tp2=104, qty=10):
            ?, ?, ?, ?, ?, ?, ?, ?)
     """, (qty, entry, entry, entry, stop, tp1, tp2, entry))
     return conn.execute("SELECT id FROM trade_positions").fetchone()["id"]
+
+
+def _utc_ago(seconds):
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+def test_entry_price_uses_fresh_realtime_cache():
+    """开仓取价：1 秒内的实时缓存可以使用。"""
+    import trade_logic
+
+    market = {"snapshot": {"mark_price": 90.0}}
+    realtime = {"cache_updated_at": _utc_ago(0), "last_trade_price": 101.0}
+
+    with patch('trade_logic.get_mark_price', return_value=120.0) as mark:
+        price = trade_logic._entry_raw_price("TEST", market, realtime)
+
+    assert price == 101.0
+    mark.assert_not_called()
+
+
+def test_entry_price_ignores_stale_realtime_cache():
+    """开仓取价：超过 1 秒的实时缓存必须改拉 Binance mark price。"""
+    import trade_logic
+
+    market = {"snapshot": {"mark_price": 90.0}}
+    realtime = {"cache_updated_at": _utc_ago(2), "last_trade_price": 101.0}
+
+    with patch('trade_logic.get_mark_price', return_value=120.0) as mark:
+        price = trade_logic._entry_raw_price("TEST", market, realtime)
+
+    assert price == 120.0
+    mark.assert_called_once_with("TEST")
+
+
+def test_entry_price_never_falls_back_to_stale_realtime_cache():
+    """开仓取价：Binance 拉价失败时可用普通快照兜底，但不能用过期实时缓存。"""
+    import trade_logic
+
+    market = {"snapshot": {"mark_price": 90.0}}
+    realtime = {"cache_updated_at": _utc_ago(86400), "last_trade_price": 101.0}
+
+    with patch('trade_logic.get_mark_price', return_value=None):
+        price = trade_logic._entry_raw_price("TEST", market, realtime)
+
+    assert price == 90.0
 
 
 def test_tp2_can_trigger():
@@ -136,7 +182,14 @@ def test_tp1_already_done_not_retriggered():
 
 
 if __name__ == "__main__":
-    tests = [test_tp2_can_trigger, test_stop_loss_with_slippage, test_tp1_already_done_not_retriggered]
+    tests = [
+        test_entry_price_uses_fresh_realtime_cache,
+        test_entry_price_ignores_stale_realtime_cache,
+        test_entry_price_never_falls_back_to_stale_realtime_cache,
+        test_tp2_can_trigger,
+        test_stop_loss_with_slippage,
+        test_tp1_already_done_not_retriggered,
+    ]
     failed = 0
     for t in tests:
         try:

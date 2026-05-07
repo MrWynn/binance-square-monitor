@@ -28,6 +28,7 @@ ARCHIVE_FUNDING_HOT_PCT = 0.05
 ARCHIVE_LONG_SHORT_HOT = 2.0
 ARCHIVE_TAKER_WEAK = 1.15
 REALTIME_PRICE_MAX_AGE_SECONDS = 5
+ENTRY_REALTIME_PRICE_MAX_AGE_SECONDS = 1
 VERDICT_ORDER = {
     "✅ 看起来健康": 0,
     "🎯 值得留意": 1,
@@ -77,6 +78,12 @@ def _current_price(market: dict, realtime: dict) -> float | None:
     return float(val) if val else None
 
 
+def _snapshot_price(market: dict) -> float | None:
+    snap = market.get("snapshot") or {}
+    val = snap.get("mark_price")
+    return float(val) if val else None
+
+
 def _timestamp_age_seconds(raw: str | None) -> float | None:
     if not raw:
         return None
@@ -100,6 +107,21 @@ def _position_price(token: str, market: dict, realtime: dict) -> float | None:
     if fresh_price:
         return fresh_price
     return _current_price(market, realtime)
+
+
+def _entry_raw_price(token: str, market: dict, realtime: dict) -> float | None:
+    age = _timestamp_age_seconds(
+        realtime.get("cache_updated_at") or realtime.get("updated_at")
+    )
+    if age is not None and age <= ENTRY_REALTIME_PRICE_MAX_AGE_SECONDS:
+        price = _current_price(market, realtime)
+        if price:
+            return price
+
+    fresh_price = get_mark_price(token)
+    if fresh_price:
+        return fresh_price
+    return _snapshot_price(market)
 
 
 def _entry_limit_price(realtime: dict, fallback_price: float) -> float:
@@ -344,7 +366,9 @@ def open_paper_position(conn, candidate: dict, settings: dict) -> bool | dict:
         return False
 
     # 获取当前价（带滑点模拟）
-    raw_price = candidate.get("price")
+    market = _load_market(conn, token)
+    realtime = _load_realtime(conn, token)
+    raw_price = _entry_raw_price(token, market, realtime)
     if not raw_price or raw_price <= 0:
         _debug_reject(token, f"价格无效 ({raw_price})", candidate)
         return False
@@ -380,6 +404,8 @@ def open_paper_position(conn, candidate: dict, settings: dict) -> bool | dict:
 
     snapshot = {
         **candidate,
+        "entry_market": market,
+        "entry_realtime": realtime,
         "_risk_meta": {
             "tier": tier,
             "stop_mode": stop_mode,
@@ -450,11 +476,8 @@ def manual_open_on_watch(conn, token: str, settings: dict) -> dict:
 
     market = _load_market(conn, token)
     realtime = _load_realtime(conn, token)
-    raw_price = _current_price(market, realtime)
+    raw_price = _entry_raw_price(token, market, realtime)
 
-    # 如果本地缓存没有价格，尝试实时拉一次
-    if not raw_price or raw_price <= 0:
-        raw_price = get_mark_price(token)
     if not raw_price or raw_price <= 0:
         return {"ok": False, "reason": f"{token} 缺少可用市价（可能没有永续合约或接口超时）"}
 
