@@ -301,13 +301,13 @@ def evaluate_entry_quality(
         hard_block.append(f"24h 涨幅 {ch24h:+.1f}% 超过追高上限 {config.TRADING_MAX_CHANGE_24H_PCT}%")
 
     # # ---- 硬否决：流动性不足 ----
-    # min_24h_volume = getattr(config, "TRADING_MIN_24H_VOLUME_USDT", 5000.0)
-    # if vol24h is None:
-    #     hard_block.append("24h 成交额缺失，按风控不允许开仓")
-    # elif vol24h <= min_24h_volume:
-    #     hard_block.append(
-    #         f"24h 成交额 {vol24h:.0f} USDT <= {min_24h_volume:.0f} USDT，流动性不足"
-    #     )
+    min_24h_volume = getattr(config, "TRADING_MIN_24H_VOLUME_USDT", 5000.0)
+    if vol24h is None:
+        hard_block.append("24h 成交额缺失，按风控不允许开仓")
+    elif vol24h <= min_24h_volume:
+        hard_block.append(
+            f"24h 成交额 {vol24h:.0f} USDT <= {min_24h_volume:.0f} USDT，流动性不足"
+        )
 
     # ---- 硬否决：情绪过热（v2.2 新增，基于失败归档反哺）----
     max_fr = getattr(config, "TRADING_MAX_ENTRY_FUNDING_PCT", 0.05)
