@@ -147,7 +147,7 @@ def test_entry_quality_tiered_full():
     snap = {
         "change_15m_pct": 2.0, "change_1h_pct": 5.0,
         "change_4h_pct": 10, "change_24h_pct": 20,
-        "volume_24h_usd": 6000,
+        "volume_24h_usd": 100_000_000,
         "oi_change_15m_pct": 2, "oi_change_1h_pct": 3, "oi_change_4h_pct": 5,
         "taker_buy_sell_ratio": 1.3,
     }
@@ -165,7 +165,7 @@ def test_entry_quality_tiered_half():
     snap = {
         "change_15m_pct": 2.0, "change_1h_pct": 5.0,
         "change_4h_pct": 10, "change_24h_pct": 20,
-        "volume_24h_usd": 6000,
+        "volume_24h_usd": 100_000_000,
         "oi_change_15m_pct": 2, "oi_change_1h_pct": -1,  # 1 项不过
         "oi_change_4h_pct": 5,
         "taker_buy_sell_ratio": 1.0,  # 又 1 项不过（<1.15）
@@ -181,7 +181,7 @@ def test_entry_quality_hard_block_追高():
     snap = {
         "change_15m_pct": 1, "change_1h_pct": 5,
         "change_4h_pct": 30,  # 追高！
-        "volume_24h_usd": 6000,
+        "volume_24h_usd": 100_000_000,
         "oi_change_15m_pct": 2, "oi_change_1h_pct": 3, "oi_change_4h_pct": 5,
         "taker_buy_sell_ratio": 1.3,
     }
@@ -199,6 +199,21 @@ def test_entry_quality_overheated_block():
     assert result["tier"] == "skip"
     assert any("过热" in x for x in result["hard_block"])
     print("OK 过热硬否决")
+
+
+def test_entry_quality_non_healthy_verdict_block():
+    snap = {
+        "change_15m_pct": 1.0, "change_1h_pct": 5.0,
+        "change_4h_pct": 10, "change_24h_pct": 20,
+        "volume_24h_usd": 100_000_000,
+        "oi_change_15m_pct": 2, "oi_change_1h_pct": 3, "oi_change_4h_pct": 5,
+        "taker_buy_sell_ratio": 1.3,
+    }
+    result = risk.evaluate_entry_quality(snap, {}, signal_score=90,
+                                          analysis_verdict="🎯 值得留意")
+    assert result["tier"] == "skip"
+    assert any("不健康" in x for x in result["hard_block"])
+    print("OK 非健康 verdict 硬否决")
 
 
 def test_entry_quality_low_volume_block():
@@ -233,7 +248,7 @@ if __name__ == "__main__":
         test_risk_check_sector_concentration, test_risk_check_cooldown,
         test_entry_quality_tiered_full, test_entry_quality_tiered_half,
         test_entry_quality_hard_block_追高, test_entry_quality_overheated_block,
-        test_entry_quality_low_volume_block,
+        test_entry_quality_non_healthy_verdict_block, test_entry_quality_low_volume_block,
         test_sector_mapping,
     ]
     failed = 0

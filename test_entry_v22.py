@@ -11,7 +11,7 @@ def _base_snap():
     return {
         "change_15m_pct": 1.0, "change_1h_pct": 5.0,
         "change_4h_pct": 10, "change_24h_pct": 20,
-        "volume_24h_usd": 6000,
+        "volume_24h_usd": 100_000_000,
         "oi_change_15m_pct": 2, "oi_change_1h_pct": 3, "oi_change_4h_pct": 5,
         "taker_buy_sell_ratio": 1.3,
         "funding_rate_pct": 0.01,   # 正常
@@ -122,7 +122,7 @@ def test_taker_too_low_also_rejected():
 
 def test_volume_24h_above_threshold_passes():
     snap = _base_snap()
-    snap["volume_24h_usd"] = 6000
+    snap["volume_24h_usd"] = 100_000_000
     result = risk.evaluate_entry_quality(snap, {}, signal_score=80,
                                           analysis_verdict="✅ 看起来健康")
     assert result["tier"] in ("full", "half"), f"应通过，实际 skip: {result['hard_block']}"
